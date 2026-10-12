@@ -1,0 +1,12 @@
+# ppt_note_toolkit_gui.py 설치용
+# 사용법: pip install -r requirements.txt
+
+# 필수 (①②③④ 공통 - PPTX 읽기/쓰기)
+python-pptx>=0.6.21
+
+# ④ PDF → PPT 탭 전용 (선택 - 없으면 다른 탭은 정상 동작, 이 탭만 비활성)
+pymupdf>=1.23.0
+pillow>=10.0.0
+
+# ③ 음성 변환 탭 전용 (선택 - 없으면 다른 탭은 정상 동작, 이 탭만 비활성)
+azure-cognitiveservices-speech>=1.34.0

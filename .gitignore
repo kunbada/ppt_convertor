@@ -1,0 +1,7 @@
+# 개인 키/보관함 파일, 작업 산출물은 올리지 않음
+ppt-vault-*.json
+*.pptx
+*.pdf
+*.mp3
+*_이미지/
+__pycache__/

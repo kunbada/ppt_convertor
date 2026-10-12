@@ -1,0 +1,1106 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PPT 노트 도구</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+<style>
+/* Layout: 작업 패널(좌) + 진행 로그(우) 2단, 좁은 화면에서는 1단으로 쌓임 */
+:root {
+  --ground: #f3f4f7;
+  --panel: #ffffff;
+  --ink: #1b2130;
+  --muted: #5e6679;
+  --line: #dde1ea;
+  --accent: #2554d0;
+  --accent-ink: #ffffff;
+  --accent-soft: #e6ecfb;
+  --log-bg: #161b26;
+  --log-ink: #d4dae6;
+  --ok: #1d7a4c;
+  --warn: #9a5b00;
+  --err: #b42318;
+  --f-ui: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "Consolas", "D2Coding", monospace;
+  --r: 8px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #12151c; --panel: #1b202a; --ink: #e6e9f0; --muted: #9aa3b5; --line: #2c3341;
+    --accent: #6e93f5; --accent-ink: #0d1220; --accent-soft: #232d45;
+    --log-bg: #0c0f15; --log-ink: #cdd4e2; --ok: #5cc48d; --warn: #e2a64a; --err: #f07d72;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #12151c; --panel: #1b202a; --ink: #e6e9f0; --muted: #9aa3b5; --line: #2c3341;
+  --accent: #6e93f5; --accent-ink: #0d1220; --accent-soft: #232d45;
+  --log-bg: #0c0f15; --log-ink: #cdd4e2; --ok: #5cc48d; --warn: #e2a64a; --err: #f07d72;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body { background: var(--ground); color: var(--ink); font: 14px/1.6 var(--f-ui); }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 28px 20px 40px; display: grid; gap: 20px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+header p { margin: 0; color: var(--muted); }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); }
+.tab { appearance: none; border: 0; background: none; color: var(--muted); font: 500 14px var(--f-ui);
+  padding: 10px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
+.tab .n { font-family: var(--f-mono); font-size: 12px; margin-right: 6px; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.tab:hover { color: var(--ink); }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: 20px; align-items: start; }
+@media (max-width: 960px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 22px; display: grid; gap: 18px; min-width: 0; }
+.panel h2 { margin: 0; font-size: 17px; font-weight: 600; text-wrap: balance; }
+.panel .lead { margin: -10px 0 0; color: var(--muted); max-width: 65ch; }
+.field { display: grid; gap: 6px; min-width: 0; }
+.label { font-weight: 600; font-size: 13px; }
+.hint { color: var(--muted); font-size: 12.5px; }
+.drop { display: flex; align-items: center; gap: 12px; border: 1.5px dashed var(--line); border-radius: var(--r);
+  padding: 12px 14px; cursor: pointer; background: var(--ground); min-width: 0; transition: border-color .15s, background .15s; }
+.drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.drop .btnlike { flex: none; font-weight: 600; font-size: 13px; color: var(--accent); }
+.drop .fname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.drop.has .fname { color: var(--ink); font-weight: 500; }
+input[type=text], input[type=password], input[type=number], select, textarea {
+  font: 14px var(--f-ui); color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 8px 10px; width: 100%; min-width: 0; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+textarea { font-family: var(--f-mono); font-size: 12.5px; line-height: 1.55; resize: vertical; min-height: 180px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.sep { border: 0; border-top: 1px solid var(--line); margin: 0; }
+button.b { appearance: none; font: 600 13.5px var(--f-ui); border-radius: 6px; padding: 9px 16px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+button.b:hover { border-color: var(--accent); color: var(--accent); }
+button.b.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.b.primary:hover { filter: brightness(1.08); color: var(--accent-ink); }
+button.b:disabled { opacity: .5; cursor: not-allowed; }
+.spacer { flex: 1; }
+.radio { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.radio:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.radio input { margin-top: 4px; }
+.radio b { display: block; font-weight: 600; }
+.radio code, .hint code { font-family: var(--f-mono); font-size: 12px; }
+.check { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+progress { width: 100%; height: 8px; accent-color: var(--accent); }
+.status { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.audio-list { display: grid; gap: 6px; max-height: 320px; overflow: auto; }
+.audio-item { display: grid; grid-template-columns: 70px minmax(0,1fr); align-items: center; gap: 10px; font-size: 13px; }
+.audio-item span { font-family: var(--f-mono); color: var(--muted); }
+.audio-item audio { width: 100%; height: 34px; }
+.note { border-left: 3px solid var(--warn); background: var(--ground); padding: 10px 12px; border-radius: 0 6px 6px 0; font-size: 13px; color: var(--muted); }
+.log { background: var(--log-bg); color: var(--log-ink); border-radius: var(--r); display: grid; grid-template-rows: auto minmax(0,1fr); min-width: 0;
+  position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); height: min(78vh, 760px); }
+@media (max-width: 960px) { .log { position: static; height: 420px; } }
+.log-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.log-head b { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; font-weight: 600; }
+.log-head button { appearance: none; background: none; border: 1px solid rgba(255,255,255,.18); color: inherit; border-radius: 5px; font: 12px var(--f-ui); padding: 3px 10px; cursor: pointer; }
+.log pre { margin: 0; padding: 12px 14px; overflow: auto; font: 12px/1.6 var(--f-mono); white-space: pre-wrap; word-break: break-word; }
+.log .ok { color: var(--ok); } .log .warn { color: var(--warn); } .log .err { color: var(--err); } .log .head { color: #8fb0ff; font-weight: 500; }
+footer { color: var(--muted); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>PPT 노트 도구</h1>
+    <p>발표자 노트 삽입·추출, 노트 음성 변환, PDF → PPT 변환. 파일은 이 브라우저 안에서만 처리됩니다.</p>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab" role="tab" id="t-insert" aria-selected="true" data-tab="insert"><span class="n">01</span>노트 삽입</button>
+    <button class="tab" role="tab" id="t-extract" aria-selected="false" data-tab="extract"><span class="n">02</span>노트 추출</button>
+    <button class="tab" role="tab" id="t-tts" aria-selected="false" data-tab="tts"><span class="n">03</span>음성 변환</button>
+    <button class="tab" role="tab" id="t-pdf" aria-selected="false" data-tab="pdf"><span class="n">04</span>PDF → PPT</button>
+  </nav>
+
+  <div class="layout">
+    <main>
+      <!-- ① 노트 삽입 -->
+      <section class="panel" data-panel="insert">
+        <h2>노트 삽입 · 텍스트 → PPT</h2>
+        <p class="lead">노트 파일(.md / .txt)의 내용을 PPTX 각 슬라이드의 발표자 노트에 순서대로 넣고, 새 파일로 내려받습니다. 원본은 바뀌지 않습니다.</p>
+        <div class="field">
+          <span class="label">슬라이드 노트 파일</span>
+          <label class="drop" id="ins-notes-drop"><input type="file" id="ins-notes" accept=".md,.txt,text/plain,text/markdown"><span class="btnlike">파일 선택</span><span class="fname">.md / .txt 파일을 고르거나 끌어다 놓으세요</span></label>
+          <div class="row"><button class="b" id="ins-use-last">방금 추출한 노트 사용</button><span class="hint" id="ins-notes-src"></span></div>
+        </div>
+        <div class="field">
+          <span class="label">원본 PPTX 파일</span>
+          <label class="drop" id="ins-pptx-drop"><input type="file" id="ins-pptx" accept=".pptx"><span class="btnlike">파일 선택</span><span class="fname">.pptx 파일을 고르거나 끌어다 놓으세요</span></label>
+          <div class="row"><span class="hint" id="ins-pptx-src"></span></div>
+        </div>
+        <div class="field">
+          <label class="label" for="ins-out">저장할 파일 이름</label>
+          <input type="text" id="ins-out" placeholder="원본이름_노트삽입.pptx">
+          <span class="hint">브라우저의 기본 다운로드 폴더에 저장됩니다.</span>
+        </div>
+        <div class="row">
+          <button class="b" id="ins-dry">미리보기 (Dry Run)</button>
+          <button class="b primary" id="ins-run">노트 삽입 실행</button>
+        </div>
+      </section>
+
+      <!-- ② 노트 추출 -->
+      <section class="panel" data-panel="extract" hidden>
+        <h2>노트 추출 · PPT → 텍스트</h2>
+        <p class="lead">PPTX의 발표자 노트를 꺼내 텍스트 파일로 내려받습니다. 결과는 노트 삽입·음성 변환 탭에서 바로 이어 쓸 수 있습니다.</p>
+        <div class="field">
+          <span class="label">PPTX 파일</span>
+          <label class="drop" id="ext-pptx-drop"><input type="file" id="ext-pptx" accept=".pptx"><span class="btnlike">파일 선택</span><span class="fname">노트를 꺼낼 .pptx 파일</span></label>
+        </div>
+        <div class="field">
+          <span class="label">슬라이드 구분 방식</span>
+          <label class="radio"><input type="radio" name="ext-fmt" id="ext-fmt-md" value="markdown" checked><span><b>마크다운 형식</b><span class="hint"><code>## 슬라이드 01</code> / <code>**슬라이드 노트 내용**</code> — PPT 재삽입 시 가장 안전</span></span></label>
+          <label class="radio"><input type="radio" name="ext-fmt" id="ext-fmt-dash" value="dash"><span><b>구분선 형식</b><span class="hint"><code>-----</code> 로만 슬라이드 구분 — 읽고 편집하기 간단</span></span></label>
+        </div>
+        <div class="field">
+          <label class="label" for="ext-out">저장할 파일 이름</label>
+          <input type="text" id="ext-out" placeholder="원본이름_발표자노트.md">
+        </div>
+        <div class="row">
+          <button class="b primary" id="ext-run">텍스트로 추출</button>
+          <span class="spacer"></span>
+          <button class="b" id="ext-copy" hidden>전체 복사</button>
+        </div>
+        <div class="field" id="ext-preview-wrap" hidden>
+          <label class="label" for="ext-preview">추출 결과</label>
+          <textarea id="ext-preview" readonly></textarea>
+        </div>
+      </section>
+
+      <!-- ③ 음성 변환 -->
+      <section class="panel" data-panel="tts" hidden>
+        <h2>음성 변환 · 텍스트 → MP3</h2>
+        <p class="lead">노트를 Azure AI Speech로 읽어 슬라이드별 MP3를 만듭니다. 무료(F0) 티어는 매달 뉴럴 TTS 50만 자까지 과금되지 않습니다.</p>
+        <div class="field">
+          <span class="label">노트 소스 (.md / .txt)</span>
+          <label class="drop" id="tts-notes-drop"><input type="file" id="tts-notes" accept=".md,.txt,text/plain,text/markdown"><span class="btnlike">파일 선택</span><span class="fname">.md / .txt 파일을 고르거나 끌어다 놓으세요</span></label>
+          <div class="row"><button class="b" id="tts-use-last">방금 추출한 노트 사용</button><span class="hint" id="tts-notes-src"></span></div>
+        </div>
+        <hr class="sep">
+        <div class="field">
+          <label class="label" for="tts-key">Azure API 키</label>
+          <input type="password" id="tts-key" autocomplete="off" placeholder="Speech 리소스의 키 1 또는 키 2">
+        </div>
+        <details class="field" id="vault">
+          <summary class="label" style="cursor:pointer">🔐 키 보관함 (암호화 저장 · 불러오기)</summary>
+          <div class="grid2" style="margin-top:8px">
+            <div class="field"><label class="label" for="vault-id">아이디</label><input type="text" id="vault-id" autocomplete="off" placeholder="예: kunba"></div>
+            <div class="field"><label class="label" for="vault-pw">비밀번호</label><input type="password" id="vault-pw" autocomplete="off" placeholder="키를 잠그는 비밀번호"></div>
+          </div>
+          <div class="row">
+            <button class="b" id="vault-save">현재 키 저장</button>
+            <button class="b" id="vault-load">불러오기</button>
+            <button class="b" id="vault-export">파일로 내보내기</button>
+            <label class="b" style="cursor:pointer">파일 가져오기<input type="file" id="vault-import" accept=".json,application/json" hidden></label>
+            <button class="b" id="vault-del">삭제</button>
+          </div>
+          <span class="hint">키·리전·음성을 비밀번호로 AES-256 암호화해 이 브라우저에만 저장합니다. 서버로 전송되지 않으며, 비밀번호를 잊으면 복구할 수 없습니다. 다른 PC에서는 '파일로 내보내기' → '파일 가져오기'를 쓰세요. 공개 저장소에 올리지 마세요.</span>
+        </details>
+        <div class="grid2">
+          <div class="field">
+            <label class="label" for="tts-region">리전</label>
+            <input type="text" id="tts-region" list="tts-regions" value="koreacentral">
+            <datalist id="tts-regions"><option value="koreacentral"><option value="japaneast"><option value="eastus"><option value="eastus2"><option value="westus"><option value="southeastasia"></datalist>
+          </div>
+          <div class="field">
+            <label class="label" for="tts-locale">언어(로케일) 필터</label>
+            <input type="text" id="tts-locale" value="ko-KR">
+          </div>
+        </div>
+        <span class="hint" style="margin-top:-8px">리전은 Azure Portal에서 만든 Speech 리소스의 지역입니다. 로케일을 비우면 전체 언어를 불러옵니다.</span>
+        <div class="field">
+          <label class="label" for="tts-voice">음성</label>
+          <div class="row" style="flex-wrap:nowrap">
+            <input type="text" id="tts-voice" list="tts-voices" placeholder="예: ko-KR-SunHiNeural">
+            <datalist id="tts-voices"></datalist>
+            <button class="b" id="tts-load-voices" style="flex:none">음성 목록 불러오기</button>
+          </div>
+          <span class="hint">목록에서 고르거나, 음성 이름을 알고 있으면 직접 입력해도 됩니다.</span>
+        </div>
+        <div class="field">
+          <label class="label" for="tts-range">슬라이드 범위</label>
+          <input type="text" id="tts-range" placeholder="예: 1-5,10  (비워두면 전체)">
+        </div>
+        <label class="check"><input type="checkbox" id="tts-combine"> 모든 슬라이드를 하나의 MP3로 합친 파일도 받기 (단순 결합)</label>
+        <div class="row">
+          <button class="b primary" id="tts-run">음성 생성 시작</button>
+          <button class="b" id="tts-stop" hidden>중지</button>
+        </div>
+        <div class="field" id="tts-result" hidden>
+          <progress id="tts-progress" value="0" max="1"></progress>
+          <span class="status" id="tts-status"></span>
+          <div class="audio-list" id="tts-list"></div>
+          <div class="row">
+            <button class="b primary" id="tts-dl-zip" disabled>슬라이드별 MP3 (ZIP) 받기</button>
+            <button class="b" id="tts-dl-combined" disabled>합친 MP3 받기</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ④ PDF → PPT -->
+      <section class="panel" data-panel="pdf" hidden>
+        <h2>PDF → PPT · 이미지 변환</h2>
+        <p class="lead">PDF 각 페이지를 고해상도 JPG로 렌더링해 슬라이드 전체에 꽉 채운 PPTX를 만듭니다. 이미지 방식이라 폰트와 레이아웃이 깨지지 않습니다.</p>
+        <div class="field">
+          <span class="label">변환할 PDF 파일</span>
+          <label class="drop" id="pdf-file-drop"><input type="file" id="pdf-file" accept=".pdf,application/pdf"><span class="btnlike">파일 선택</span><span class="fname">.pdf 파일을 고르거나 끌어다 놓으세요</span></label>
+        </div>
+        <div class="field">
+          <label class="label" for="pdf-out">저장할 PPTX 이름</label>
+          <input type="text" id="pdf-out" placeholder="원본이름.pptx">
+        </div>
+        <div class="grid2">
+          <div class="field">
+            <label class="label" for="pdf-dpi">해상도 (DPI)</label>
+            <input type="number" id="pdf-dpi" min="100" max="600" step="50" value="300">
+          </div>
+          <div class="field">
+            <label class="label" for="pdf-q">JPG 품질 (50–100)</label>
+            <input type="number" id="pdf-q" min="50" max="100" step="5" value="95">
+          </div>
+        </div>
+        <span class="hint" style="margin-top:-8px">DPI가 높을수록 화질은 좋아지지만 변환 시간과 파일 용량이 늘어납니다. 권장 300.</span>
+        <label class="check"><input type="checkbox" id="pdf-jpg"> 렌더링한 JPG 이미지도 ZIP으로 받기</label>
+        <div class="row">
+          <button class="b primary" id="pdf-run">변환 시작</button>
+          <button class="b" id="pdf-to-insert" hidden>이 PPTX에 노트 삽입하기 →</button>
+        </div>
+        <div class="field">
+          <progress id="pdf-progress" value="0" max="1"></progress>
+          <span class="status" id="pdf-status">PDF 파일을 선택하세요.</span>
+        </div>
+      </section>
+    </main>
+
+    <aside class="log" aria-label="진행 로그">
+      <div class="log-head"><b>진행 로그</b><button id="log-clear">지우기</button></div>
+      <pre id="log"></pre>
+    </aside>
+  </div>
+  <footer>인터넷 연결이 필요합니다 (라이브러리 로딩, Azure 음성 합성). PPT → PDF/이미지 변환은 브라우저에서 정확히 할 수 없어 로컬 스크립트(ppt_export.py)를 사용합니다. PPTX·PDF 파일 내용은 외부로 전송되지 않으며, 음성 변환 시 노트 텍스트만 Azure로 전송됩니다.</footer>
+</div>
+
+<script>
+"use strict";
+/* ═════════════ 공통 유틸 ═════════════ */
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+function log(msg, cls) {
+  const line = document.createElement("span");
+  if (cls) line.className = cls;
+  else if (/^\s*(✗|오류)/.test(msg)) line.className = "err";
+  else if (/^\s*⚠/.test(msg)) line.className = "warn";
+  else if (/^\s*(✓|✅)/.test(msg)) line.className = "ok";
+  else if (/^=====/.test(msg)) line.className = "head";
+  line.textContent = msg + "\n";
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+$("log-clear").onclick = () => { logEl.textContent = ""; };
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+const baseName = (name) => name.replace(/\.[^.]+$/, "");
+const pad = (n, w) => String(n).padStart(w, "0");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function readText(file) {
+  return file.text().then((t) => t.replace(/^﻿/, "")); // utf-8-sig
+}
+
+const shared = { lastExtractedText: null, lastExtractedName: null, lastExtractedNotes: null, lastPdfPptx: null };
+
+// 탭 전환
+document.querySelectorAll(".tab").forEach((t) => {
+  t.onclick = () => showTab(t.dataset.tab);
+});
+function showTab(name) {
+  document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", t.dataset.tab === name));
+  document.querySelectorAll("[data-panel]").forEach((p) => (p.hidden = p.dataset.panel !== name));
+  try { localStorage.setItem("pptnote.tab", name); } catch (e) {}
+}
+try { const t = localStorage.getItem("pptnote.tab"); if (t) showTab(t); } catch (e) {}
+
+// 파일 드롭존: 선택/드래그앤드롭 공용
+function setupDrop(inputId, onFile) {
+  const input = $(inputId), drop = $(inputId + "-drop"), fname = drop.querySelector(".fname");
+  const apply = (file) => {
+    if (!file) return;
+    drop.classList.add("has");
+    fname.textContent = `${file.name}  ·  ${(file.size / 1024).toLocaleString(undefined, { maximumFractionDigits: 0 })} KB`;
+    onFile(file);
+  };
+  input.addEventListener("change", () => apply(input.files[0]));
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); apply(e.dataTransfer.files[0]); });
+  return { set: (label) => { drop.classList.add("has"); fname.textContent = label; } };
+}
+
+/* ═════════════ 노트 파일 파싱 / 포맷 변환 ═════════════ */
+const MD_HEADER_RE = /^##\s*슬라이드\s*(\d+)/m;
+const DASH_LINE_RE = /^\s*-{3,}\s*$/m;
+
+function parseMarkdownNotes(text) {
+  const blocks = text.split(/^##\s*슬라이드\s*(\d+)/m);
+  const notes = new Map(), order = [];
+  for (let i = 1; i < blocks.length; i += 2) {
+    const slideNo = parseInt(blocks[i], 10);
+    const blockText = blocks[i + 1] || "";
+    const m = blockText.match(/\*\*슬라이드 노트 내용\*\*\s*\n([\s\S]+?)(?:\n-{3,}|$)/);
+    notes.set(slideNo, m ? m[1].trim() : blockText.trim());
+    order.push(slideNo);
+  }
+  return { notes, order };
+}
+function parseDashNotes(text) {
+  const parts = text.split(/^\s*-{3,}\s*$/m);
+  const notes = new Map(), order = [];
+  parts.forEach((part, i) => {
+    const idx = i + 1, content = part.trim();
+    if (content === "" && idx === parts.length) return; // 구분선으로 끝나는 빈 조각 무시
+    notes.set(idx, content); order.push(idx);
+  });
+  return { notes, order };
+}
+function parsePlainNotes(text) {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const notes = new Map(), order = [];
+  lines.forEach((l, i) => { notes.set(i + 1, l); order.push(i + 1); });
+  return { notes, order };
+}
+function loadNotes(text) {
+  text = text.replace(/\r\n/g, "\n");
+  if (MD_HEADER_RE.test(text)) return { ...parseMarkdownNotes(text), fmt: "markdown" };
+  if (DASH_LINE_RE.test(text)) return { ...parseDashNotes(text), fmt: "dash-separated" };
+  return { ...parsePlainNotes(text), fmt: "plain-text(legacy)" };
+}
+function formatAsMarkdown(data) {
+  return data.map(([no, note]) => {
+    const t = note && note.trim() ? note.trim() : "(발표자 노트 없음)";
+    return `## 슬라이드 ${pad(no, 2)}\n**슬라이드 노트 내용**\n${t}\n\n---\n`;
+  }).join("\n");
+}
+function formatAsDash(data, dash = "-----") {
+  const lines = [];
+  data.forEach(([no, note], i) => {
+    if (i > 0) lines.push("", dash, "");
+    lines.push(note && note.trim() ? note.trim() : "(발표자 노트 없음)");
+  });
+  return lines.join("\n") + "\n";
+}
+
+/* ═════════════ PPTX (OOXML) 처리 ═════════════ */
+const NS = {
+  p: "http://schemas.openxmlformats.org/presentationml/2006/main",
+  a: "http://schemas.openxmlformats.org/drawingml/2006/main",
+  r: "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+  rel: "http://schemas.openxmlformats.org/package/2006/relationships",
+  ct: "http://schemas.openxmlformats.org/package/2006/content-types",
+};
+const RT = {
+  notesSlide: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide",
+  notesMaster: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster",
+  slide: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide",
+  theme: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme",
+};
+const CT = {
+  notesSlide: "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml",
+  notesMaster: "application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml",
+  theme: "application/vnd.openxmlformats-officedocument.theme+xml",
+};
+const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+
+// python-pptx 기본 노트 마스터 / 테마 (PPTX에 노트 마스터가 없을 때만 사용)
+const DEFAULT_NOTES_MASTER = `<p:notesMaster
+    xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+    xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+    xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    ><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr><p:sp><p:nvSpPr><p:cNvPr id="2" name="Header Placeholder 1"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="hdr" sz="quarter"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="2971800" cy="457200"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0"/><a:lstStyle><a:lvl1pPr algn="l"><a:defRPr sz="1200"/></a:lvl1pPr></a:lstStyle><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="Date Placeholder 2"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="dt" idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="3884613" y="0"/><a:ext cx="2971800" cy="457200"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0"/><a:lstStyle><a:lvl1pPr algn="r"><a:defRPr sz="1200"/></a:lvl1pPr></a:lstStyle><a:p><a:fld id="{0F89C1C7-3DCD-1040-A9CF-14679D8B5DDD}" type="datetimeFigureOut"><a:rPr lang="en-US" smtClean="0"/><a:t>10/17/16</a:t></a:fld><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="4" name="Slide Image Placeholder 3"/><p:cNvSpPr><a:spLocks noGrp="1" noRot="1" noChangeAspect="1"/></p:cNvSpPr><p:nvPr><p:ph type="sldImg" idx="2"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="1143000" y="685800"/><a:ext cx="4572000" cy="3429000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln w="12700"><a:solidFill><a:prstClr val="black"/></a:solidFill></a:ln></p:spPr><p:txBody><a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0" anchor="ctr"/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="5" name="Notes Placeholder 4"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="body" sz="quarter" idx="3"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="685800" y="4343400"/><a:ext cx="5486400" cy="4114800"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0"/><a:lstStyle/><a:p><a:pPr lvl="0"/><a:r><a:rPr lang="en-US" smtClean="0"/><a:t>Click to edit Master text styles</a:t></a:r></a:p><a:p><a:pPr lvl="1"/><a:r><a:rPr lang="en-US" smtClean="0"/><a:t>Second level</a:t></a:r></a:p><a:p><a:pPr lvl="2"/><a:r><a:rPr lang="en-US" smtClean="0"/><a:t>Third level</a:t></a:r></a:p><a:p><a:pPr lvl="3"/><a:r><a:rPr lang="en-US" smtClean="0"/><a:t>Fourth level</a:t></a:r></a:p><a:p><a:pPr lvl="4"/><a:r><a:rPr lang="en-US" smtClean="0"/><a:t>Fifth level</a:t></a:r><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="6" name="Footer Placeholder 5"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="ftr" sz="quarter" idx="4"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="0" y="8685213"/><a:ext cx="2971800" cy="457200"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0" anchor="b"/><a:lstStyle><a:lvl1pPr algn="l"><a:defRPr sz="1200"/></a:lvl1pPr></a:lstStyle><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="7" name="Slide Number Placeholder 6"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="sldNum" sz="quarter" idx="5"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="3884613" y="8685213"/><a:ext cx="2971800" cy="457200"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0" anchor="b"/><a:lstStyle><a:lvl1pPr algn="r"><a:defRPr sz="1200"/></a:lvl1pPr></a:lstStyle><a:p><a:fld id="{BB5E49A5-4136-284D-997B-48E1D791AD67}" type="slidenum"><a:rPr lang="en-US" smtClean="0"/><a:t>‹#›</a:t></a:fld><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp></p:spTree><p:extLst><p:ext uri="{BB962C8B-B14F-4D97-AF65-F5344CB8AC3E}"><p14:creationId xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" val="2623252185"/></p:ext></p:extLst></p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:notesStyle><a:lvl1pPr marL="0" algn="l" defTabSz="457200" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl1pPr><a:lvl2pPr marL="457200" algn="l" defTabSz="457200" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl2pPr><a:lvl3pPr marL="914400" algn="l" defTabSz="457200" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl3pPr><a:lvl4pPr marL="1371600" algn="l" defTabSz="457200" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl4pPr><a:lvl5pPr marL="1828800" algn="l" defTabSz="457200" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl5pPr><a:lvl6pPr marL="2286000" algn="l" defTabSz="457200" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl6pPr><a:lvl7pPr marL="2743200" algn="l" defTabSz="457200" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl7pPr><a:lvl8pPr marL="3200400" algn="l" defTabSz="457200" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl8pPr><a:lvl9pPr marL="3657600" algn="l" defTabSz="457200" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl9pPr></p:notesStyle></p:notesMaster>`;
+const DEFAULT_THEME = `<a:theme
+    xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+    name="Office Theme"
+    ><a:themeElements><a:clrScheme name="Office"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F497D"/></a:dk2><a:lt2><a:srgbClr val="EEECE1"/></a:lt2><a:accent1><a:srgbClr val="4F81BD"/></a:accent1><a:accent2><a:srgbClr val="C0504D"/></a:accent2><a:accent3><a:srgbClr val="9BBB59"/></a:accent3><a:accent4><a:srgbClr val="8064A2"/></a:accent4><a:accent5><a:srgbClr val="4BACC6"/></a:accent5><a:accent6><a:srgbClr val="F79646"/></a:accent6><a:hlink><a:srgbClr val="0000FF"/></a:hlink><a:folHlink><a:srgbClr val="800080"/></a:folHlink></a:clrScheme><a:fontScheme name="Office"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/><a:font script="Jpan" typeface="ＭＳ Ｐゴシック"/><a:font script="Hang" typeface="맑은 고딕"/><a:font script="Hans" typeface="宋体"/><a:font script="Hant" typeface="新細明體"/><a:font script="Arab" typeface="Times New Roman"/><a:font script="Hebr" typeface="Times New Roman"/><a:font script="Thai" typeface="Angsana New"/><a:font script="Ethi" typeface="Nyala"/><a:font script="Beng" typeface="Vrinda"/><a:font script="Gujr" typeface="Shruti"/><a:font script="Khmr" typeface="MoolBoran"/><a:font script="Knda" typeface="Tunga"/><a:font script="Guru" typeface="Raavi"/><a:font script="Cans" typeface="Euphemia"/><a:font script="Cher" typeface="Plantagenet Cherokee"/><a:font script="Yiii" typeface="Microsoft Yi Baiti"/><a:font script="Tibt" typeface="Microsoft Himalaya"/><a:font script="Thaa" typeface="MV Boli"/><a:font script="Deva" typeface="Mangal"/><a:font script="Telu" typeface="Gautami"/><a:font script="Taml" typeface="Latha"/><a:font script="Syrc" typeface="Estrangelo Edessa"/><a:font script="Orya" typeface="Kalinga"/><a:font script="Mlym" typeface="Kartika"/><a:font script="Laoo" typeface="DokChampa"/><a:font script="Sinh" typeface="Iskoola Pota"/><a:font script="Mong" typeface="Mongolian Baiti"/><a:font script="Viet" typeface="Times New Roman"/><a:font script="Uigh" typeface="Microsoft Uighur"/><a:font script="Geor" typeface="Sylfaen"/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/><a:font script="Jpan" typeface="ＭＳ Ｐゴシック"/><a:font script="Hang" typeface="맑은 고딕"/><a:font script="Hans" typeface="宋体"/><a:font script="Hant" typeface="新細明體"/><a:font script="Arab" typeface="Arial"/><a:font script="Hebr" typeface="Arial"/><a:font script="Thai" typeface="Cordia New"/><a:font script="Ethi" typeface="Nyala"/><a:font script="Beng" typeface="Vrinda"/><a:font script="Gujr" typeface="Shruti"/><a:font script="Khmr" typeface="DaunPenh"/><a:font script="Knda" typeface="Tunga"/><a:font script="Guru" typeface="Raavi"/><a:font script="Cans" typeface="Euphemia"/><a:font script="Cher" typeface="Plantagenet Cherokee"/><a:font script="Yiii" typeface="Microsoft Yi Baiti"/><a:font script="Tibt" typeface="Microsoft Himalaya"/><a:font script="Thaa" typeface="MV Boli"/><a:font script="Deva" typeface="Mangal"/><a:font script="Telu" typeface="Gautami"/><a:font script="Taml" typeface="Latha"/><a:font script="Syrc" typeface="Estrangelo Edessa"/><a:font script="Orya" typeface="Kalinga"/><a:font script="Mlym" typeface="Kartika"/><a:font script="Laoo" typeface="DokChampa"/><a:font script="Sinh" typeface="Iskoola Pota"/><a:font script="Mong" typeface="Mongolian Baiti"/><a:font script="Viet" typeface="Arial"/><a:font script="Uigh" typeface="Microsoft Uighur"/><a:font script="Geor" typeface="Sylfaen"/></a:minorFont></a:fontScheme><a:fmtScheme name="Office"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:schemeClr val="phClr"><a:tint val="50000"/><a:satMod val="300000"/></a:schemeClr></a:gs><a:gs pos="35000"><a:schemeClr val="phClr"><a:tint val="37000"/><a:satMod val="300000"/></a:schemeClr></a:gs><a:gs pos="100000"><a:schemeClr val="phClr"><a:tint val="15000"/><a:satMod val="350000"/></a:schemeClr></a:gs></a:gsLst><a:lin ang="16200000" scaled="1"/></a:gradFill><a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:schemeClr val="phClr"><a:tint val="100000"/><a:shade val="100000"/><a:satMod val="130000"/></a:schemeClr></a:gs><a:gs pos="100000"><a:schemeClr val="phClr"><a:tint val="50000"/><a:shade val="100000"/><a:satMod val="350000"/></a:schemeClr></a:gs></a:gsLst><a:lin ang="16200000" scaled="0"/></a:gradFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"><a:shade val="95000"/><a:satMod val="105000"/></a:schemeClr></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="25400" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="38100" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst><a:outerShdw blurRad="40000" dist="20000" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="38000"/></a:srgbClr></a:outerShdw></a:effectLst></a:effectStyle><a:effectStyle><a:effectLst><a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="35000"/></a:srgbClr></a:outerShdw></a:effectLst></a:effectStyle><a:effectStyle><a:effectLst><a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="35000"/></a:srgbClr></a:outerShdw></a:effectLst><a:scene3d><a:camera prst="orthographicFront"><a:rot lat="0" lon="0" rev="0"/></a:camera><a:lightRig rig="threePt" dir="t"><a:rot lat="0" lon="0" rev="1200000"/></a:lightRig></a:scene3d><a:sp3d><a:bevelT w="63500" h="25400"/></a:sp3d></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:schemeClr val="phClr"><a:tint val="40000"/><a:satMod val="350000"/></a:schemeClr></a:gs><a:gs pos="40000"><a:schemeClr val="phClr"><a:tint val="45000"/><a:shade val="99000"/><a:satMod val="350000"/></a:schemeClr></a:gs><a:gs pos="100000"><a:schemeClr val="phClr"><a:shade val="20000"/><a:satMod val="255000"/></a:schemeClr></a:gs></a:gsLst><a:path path="circle"><a:fillToRect l="50000" t="-80000" r="50000" b="180000"/></a:path></a:gradFill><a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:schemeClr val="phClr"><a:tint val="80000"/><a:satMod val="300000"/></a:schemeClr></a:gs><a:gs pos="100000"><a:schemeClr val="phClr"><a:shade val="30000"/><a:satMod val="200000"/></a:schemeClr></a:gs></a:gsLst><a:path path="circle"><a:fillToRect l="50000" t="50000" r="50000" b="50000"/></a:path></a:gradFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults><a:spDef><a:spPr/><a:bodyPr/><a:lstStyle/><a:style><a:lnRef idx="1"><a:schemeClr val="accent1"/></a:lnRef><a:fillRef idx="3"><a:schemeClr val="accent1"/></a:fillRef><a:effectRef idx="2"><a:schemeClr val="accent1"/></a:effectRef><a:fontRef idx="minor"><a:schemeClr val="lt1"/></a:fontRef></a:style></a:spDef><a:lnDef><a:spPr/><a:bodyPr/><a:lstStyle/><a:style><a:lnRef idx="2"><a:schemeClr val="accent1"/></a:lnRef><a:fillRef idx="0"><a:schemeClr val="accent1"/></a:fillRef><a:effectRef idx="1"><a:schemeClr val="accent1"/></a:effectRef><a:fontRef idx="minor"><a:schemeClr val="tx1"/></a:fontRef></a:style></a:lnDef></a:objectDefaults><a:extraClrSchemeLst/></a:theme>`;
+
+const parseXml = (s) => new DOMParser().parseFromString(s, "application/xml");
+const serXml = (doc) => XML_DECL + new XMLSerializer().serializeToString(doc.documentElement);
+function fragment(doc, xml) {
+  const wrap = parseXml(`<w xmlns:p="${NS.p}" xmlns:a="${NS.a}" xmlns:r="${NS.r}">${xml}</w>`);
+  return Array.from(wrap.documentElement.childNodes).map((n) => doc.importNode(n, true));
+}
+const kids = (el, ns, local) => Array.from(el.childNodes).filter((n) => n.nodeType === 1 && n.namespaceURI === ns && n.localName === local);
+const kid = (el, ns, local) => kids(el, ns, local)[0] || null;
+
+function resolvePath(fromPart, target) {
+  if (target.startsWith("/")) return target.slice(1);
+  const parts = fromPart.split("/"); parts.pop();
+  for (const seg of target.split("/")) {
+    if (seg === "..") parts.pop(); else if (seg !== ".") parts.push(seg);
+  }
+  return parts.join("/");
+}
+function relsPathOf(part) {
+  const i = part.lastIndexOf("/");
+  return `${part.slice(0, i)}/_rels/${part.slice(i + 1)}.rels`;
+}
+function relativeTarget(fromPart, toPart) {
+  const from = fromPart.split("/"); from.pop();
+  const to = toPart.split("/");
+  let i = 0;
+  while (i < from.length && i < to.length - 1 && from[i] === to[i]) i++;
+  return "../".repeat(from.length - i) + to.slice(i).join("/");
+}
+
+class Pptx {
+  static async open(fileOrBlob) {
+    const p = new Pptx();
+    p.zip = await JSZip.loadAsync(fileOrBlob);
+    p.docs = new Map(); // 수정된 XML 문서 캐시
+    if (!p.zip.file("ppt/presentation.xml")) throw new Error("ppt/presentation.xml 이 없습니다. 올바른 PPTX 파일이 아닙니다.");
+    return p;
+  }
+  has(path) { return !!this.zip.file(path); }
+  async doc(path) {
+    if (this.docs.has(path)) return this.docs.get(path);
+    const f = this.zip.file(path);
+    if (!f) return null;
+    const d = parseXml(await f.async("string"));
+    if (d.getElementsByTagName("parsererror").length) throw new Error(`${path} XML 파싱 실패`);
+    this.docs.set(path, d);
+    return d;
+  }
+  newDoc(path, xml) { const d = parseXml(xml); this.docs.set(path, d); return d; }
+  async rels(part, create = false) {
+    const rp = relsPathOf(part);
+    let d = await this.doc(rp);
+    if (!d && create) d = this.newDoc(rp, `<Relationships xmlns="${NS.rel}"></Relationships>`);
+    return d;
+  }
+  relList(relsDoc) {
+    if (!relsDoc) return [];
+    return Array.from(relsDoc.getElementsByTagNameNS(NS.rel, "Relationship")).map((r) => ({
+      id: r.getAttribute("Id"), type: r.getAttribute("Type"), target: r.getAttribute("Target"), mode: r.getAttribute("TargetMode"),
+    }));
+  }
+  addRel(relsDoc, type, target) {
+    const ids = new Set(this.relList(relsDoc).map((r) => r.id));
+    let n = 1; while (ids.has("rId" + n)) n++;
+    const el = relsDoc.createElementNS(NS.rel, "Relationship");
+    el.setAttribute("Id", "rId" + n); el.setAttribute("Type", type); el.setAttribute("Target", target);
+    relsDoc.documentElement.appendChild(el);
+    return "rId" + n;
+  }
+  async addOverride(partPath, contentType) {
+    const d = await this.doc("[Content_Types].xml");
+    const el = d.createElementNS(NS.ct, "Override");
+    el.setAttribute("PartName", "/" + partPath); el.setAttribute("ContentType", contentType);
+    d.documentElement.appendChild(el);
+  }
+  nextPartName(pattern) { // pattern: "ppt/notesSlides/notesSlide%d.xml"
+    let n = 1; while (this.has(pattern.replace("%d", n)) || this.docs.has(pattern.replace("%d", n))) n++;
+    return pattern.replace("%d", n);
+  }
+  async slideParts() {
+    const pres = await this.doc("ppt/presentation.xml");
+    const rels = this.relList(await this.rels("ppt/presentation.xml"));
+    const byId = new Map(rels.map((r) => [r.id, r]));
+    const lst = pres.getElementsByTagNameNS(NS.p, "sldIdLst")[0];
+    if (!lst) return [];
+    return kids(lst, NS.p, "sldId").map((s) => {
+      const rel = byId.get(s.getAttributeNS(NS.r, "id"));
+      return rel ? resolvePath("ppt/presentation.xml", rel.target) : null;
+    }).filter(Boolean);
+  }
+  async notesPartOf(slidePart) {
+    const rel = this.relList(await this.rels(slidePart)).find((r) => r.type === RT.notesSlide);
+    return rel ? resolvePath(slidePart, rel.target) : null;
+  }
+  static bodyPlaceholder(notesDoc) {
+    for (const sp of Array.from(notesDoc.getElementsByTagNameNS(NS.p, "sp"))) {
+      const ph = sp.getElementsByTagNameNS(NS.p, "ph")[0];
+      if (ph && ph.getAttribute("type") === "body") return sp;
+    }
+    return null;
+  }
+  static textOf(sp) {
+    if (!sp) return "";
+    const txBody = sp.getElementsByTagNameNS(NS.p, "txBody")[0];
+    if (!txBody) return "";
+    return kids(txBody, NS.a, "p").map((p) => {
+      let s = "";
+      for (const c of Array.from(p.childNodes)) {
+        if (c.nodeType !== 1) continue;
+        if (c.localName === "r" || c.localName === "fld") s += Array.from(c.getElementsByTagNameNS(NS.a, "t")).map((t) => t.textContent).join("");
+        else if (c.localName === "br") s += "\n";
+      }
+      return s;
+    }).join("\n");
+  }
+  async readNotes(slidePart) {
+    const np = await this.notesPartOf(slidePart);
+    if (!np) return "";
+    const d = await this.doc(np);
+    return d ? Pptx.textOf(Pptx.bodyPlaceholder(d)) : "";
+  }
+  async ensureNotesMaster() {
+    const presRels = await this.rels("ppt/presentation.xml");
+    const existing = this.relList(presRels).find((r) => r.type === RT.notesMaster);
+    if (existing) return resolvePath("ppt/presentation.xml", existing.target);
+
+    const nmPath = this.nextPartName("ppt/notesMasters/notesMaster%d.xml");
+    const themePath = this.nextPartName("ppt/theme/theme%d.xml");
+    this.newDoc(nmPath, DEFAULT_NOTES_MASTER);
+    this.newDoc(themePath, DEFAULT_THEME);
+    const nmRels = await this.rels(nmPath, true);
+    this.addRel(nmRels, RT.theme, relativeTarget(nmPath, themePath));
+    await this.addOverride(nmPath, CT.notesMaster);
+    await this.addOverride(themePath, CT.theme);
+    const rid = this.addRel(presRels, RT.notesMaster, relativeTarget("ppt/presentation.xml", nmPath));
+
+    const pres = await this.doc("ppt/presentation.xml");
+    const root = pres.documentElement;
+    const lst = pres.createElementNS(NS.p, "p:notesMasterIdLst");
+    const id = pres.createElementNS(NS.p, "p:notesMasterId");
+    id.setAttributeNS(NS.r, "r:id", rid);
+    lst.appendChild(id);
+    const after = kid(root, NS.p, "sldMasterIdLst");
+    root.insertBefore(lst, after ? after.nextSibling : root.firstChild);
+    return nmPath;
+  }
+  async createNotesSlide(slidePart) {
+    const nmPath = await this.ensureNotesMaster();
+    const nsPath = this.nextPartName("ppt/notesSlides/notesSlide%d.xml");
+    this.newDoc(nsPath, `<p:notes xmlns:a="${NS.a}" xmlns:p="${NS.p}" xmlns:r="${NS.r}"><p:cSld><p:spTree>` +
+      `<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>` +
+      `<p:sp><p:nvSpPr><p:cNvPr id="2" name="Slide Image Placeholder 1"/><p:cNvSpPr><a:spLocks noGrp="1" noRot="1" noChangeAspect="1"/></p:cNvSpPr><p:nvPr><p:ph type="sldImg"/></p:nvPr></p:nvSpPr><p:spPr/></p:sp>` +
+      `<p:sp><p:nvSpPr><p:cNvPr id="3" name="Notes Placeholder 2"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="ko-KR"/></a:p></p:txBody></p:sp>` +
+      `</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>`);
+    const nsRels = await this.rels(nsPath, true);
+    this.addRel(nsRels, RT.notesMaster, relativeTarget(nsPath, nmPath));
+    this.addRel(nsRels, RT.slide, relativeTarget(nsPath, slidePart));
+    this.addRel(await this.rels(slidePart, true), RT.notesSlide, relativeTarget(slidePart, nsPath));
+    await this.addOverride(nsPath, CT.notesSlide);
+    return nsPath;
+  }
+  async writeNotes(slidePart, text) {
+    let np = await this.notesPartOf(slidePart);
+    if (!np || !this.has(np) && !this.docs.has(np)) np = await this.createNotesSlide(slidePart);
+    const d = await this.doc(np);
+    let sp = Pptx.bodyPlaceholder(d);
+    if (!sp) { // 노트 본문 플레이스홀더가 없으면 생성 (python-pptx ensure_notes_placeholder 와 동일 위치)
+      const tree = d.getElementsByTagNameNS(NS.p, "spTree")[0];
+      const ids = Array.from(d.getElementsByTagNameNS(NS.p, "cNvPr")).map((e) => parseInt(e.getAttribute("id"), 10) || 0);
+      const nid = Math.max(0, ...ids) + 1;
+      fragment(d, `<p:sp><p:nvSpPr><p:cNvPr id="${nid}" name="Notes Placeholder"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="body" orient="horz" sz="quarter" idx="1"/></p:nvPr></p:nvSpPr>` +
+        `<p:spPr><a:xfrm><a:off x="685800" y="4343400"/><a:ext cx="5486400" cy="4114800"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>`).forEach((n) => tree.appendChild(n));
+      sp = Pptx.bodyPlaceholder(d);
+    }
+    let txBody = sp.getElementsByTagNameNS(NS.p, "txBody")[0];
+    if (!txBody) { fragment(d, `<p:txBody><a:bodyPr/><a:lstStyle/></p:txBody>`).forEach((n) => sp.appendChild(n)); txBody = sp.getElementsByTagNameNS(NS.p, "txBody")[0]; }
+    kids(txBody, NS.a, "p").forEach((p) => p.remove());
+    const clean = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+    for (const line of clean.split("\n")) {
+      const p = d.createElementNS(NS.a, "a:p");
+      if (line.length) {
+        const r = d.createElementNS(NS.a, "a:r");
+        const rPr = d.createElementNS(NS.a, "a:rPr"); rPr.setAttribute("lang", "ko-KR"); rPr.setAttribute("dirty", "0");
+        const t = d.createElementNS(NS.a, "a:t"); t.textContent = line;
+        r.appendChild(rPr); r.appendChild(t); p.appendChild(r);
+      } else {
+        const e = d.createElementNS(NS.a, "a:endParaRPr"); e.setAttribute("lang", "ko-KR"); p.appendChild(e);
+      }
+      txBody.appendChild(p);
+    }
+  }
+  async save() {
+    for (const [path, d] of this.docs) this.zip.file(path, serXml(d), { createFolders: false });
+    return this.zip.generateAsync({
+      type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 },
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    });
+  }
+}
+
+function checkPptxFile(file) {
+  log(`입력 파일: ${file.name}`);
+  log(`파일 크기: ${file.size.toLocaleString()} bytes`);
+  if (file.size === 0) {
+    log("✗ 파일 크기가 0바이트입니다. OneDrive '온라인 전용' 상태일 수 있습니다.\n  → 탐색기에서 파일 우클릭 → '이 디바이스에 항상 유지' 선택 후 다시 시도하세요.");
+    return false;
+  }
+  if (!/\.pptx$/i.test(file.name)) log("⚠ 확장자가 .pptx가 아닙니다.");
+  return true;
+}
+
+/* ═════════════ ① 노트 삽입 ═════════════ */
+const ins = { notesText: null, notesName: null, pptx: null };
+setupDrop("ins-notes", async (f) => { ins.notesText = await readText(f); ins.notesName = f.name; $("ins-notes-src").textContent = ""; });
+const insPptxDrop = setupDrop("ins-pptx", (f) => {
+  ins.pptx = f; $("ins-pptx-src").textContent = "";
+  $("ins-out").value = `${baseName(f.name)}_노트삽입.pptx`;
+});
+$("ins-use-last").onclick = () => {
+  if (!shared.lastExtractedText) { log("⚠ 먼저 '노트 추출' 탭에서 노트를 추출하면 여기서 바로 불러올 수 있습니다."); return; }
+  ins.notesText = shared.lastExtractedText; ins.notesName = shared.lastExtractedName;
+  $("ins-notes-src").textContent = `사용 중: ${shared.lastExtractedName} (방금 추출한 노트)`;
+  log(`'노트 추출' 탭 결과를 불러왔습니다: ${shared.lastExtractedName}`);
+};
+$("ins-dry").onclick = () => runInsert(true);
+$("ins-run").onclick = () => runInsert(false);
+
+async function runInsert(dryRun) {
+  if (!ins.notesText || !ins.pptx) { log("⚠ 노트 파일과 원본 PPTX 파일을 모두 선택하세요."); return; }
+  let outName = $("ins-out").value.trim() || `${baseName(ins.pptx.name)}_노트삽입.pptx`;
+  if (!/\.pptx$/i.test(outName)) outName += ".pptx";
+  log(`\n===== [노트 삽입] ${dryRun ? "미리보기" : "실행"} 시작 =====`);
+  const btns = [$("ins-dry"), $("ins-run")]; btns.forEach((b) => (b.disabled = true));
+  try {
+    if (!checkPptxFile(ins.pptx)) { log("\n위 문제를 해결한 뒤 다시 실행하세요. (아직 노트는 삽입되지 않았습니다)"); return; }
+    let prs;
+    try { prs = await Pptx.open(ins.pptx); }
+    catch (e) { log(`오류: PPTX 파일을 여는 중 문제가 발생했습니다: ${e.message}`); log("  → 파일이 손상되었거나 PPTX 형식이 아닐 수 있습니다."); return; }
+
+    const { notes, order, fmt } = loadNotes(ins.notesText);
+    if (!order.length) { log("오류: 노트 파일에서 슬라이드 노트를 하나도 찾지 못했습니다."); return; }
+    const slides = await prs.slideParts();
+    log(`노트 파일 형식: ${fmt}`);
+    log(`PPT 슬라이드 수: ${slides.length}장 / 노트 개수: ${order.length}개`);
+    if (slides.length !== order.length) log("⚠ 슬라이드 수와 노트 개수가 다릅니다. 순서(위치) 기준으로 매칭합니다. 결과를 반드시 확인하세요.");
+
+    let applied = 0, skipped = 0;
+    for (let pos = 0; pos < order.length; pos++) {
+      const slideNo = order[pos], text = notes.get(slideNo);
+      if (pos >= slides.length) { log(`  건너뜀 → PPT에 ${pos + 1}번째 슬라이드가 없음 (노트 원본: 슬라이드 ${slideNo})`); skipped++; continue; }
+      if (dryRun) { log(`  [미리보기] PPT ${pos + 1}번 슬라이드 ← 노트파일 슬라이드 ${slideNo} : ${text.replace(/\n/g, " ").slice(0, 50)}...`); continue; }
+      try { await prs.writeNotes(slides[pos], text); applied++; }
+      catch (e) { log(`  ✗ PPT ${pos + 1}번 슬라이드 노트 삽입 실패: ${e.message}`); skipped++; }
+    }
+    if (dryRun) { log("\n[미리보기 모드] 실제 저장은 하지 않았습니다."); return; }
+    const blob = await prs.save();
+    downloadBlob(blob, outName);
+    log(`\n✅ 총 ${applied}개 슬라이드에 노트를 삽입했습니다. (건너뜀 ${skipped}개)`);
+    log(`'${outName}' 파일을 내려받았습니다. (원본 파일은 수정하지 않았습니다)`);
+  } catch (e) {
+    log("오류: 예상치 못한 문제가 발생했습니다:\n" + (e.stack || e));
+  } finally { btns.forEach((b) => (b.disabled = false)); }
+}
+
+/* ═════════════ ② 노트 추출 ═════════════ */
+const ext = { pptx: null, autoName: "" };
+setupDrop("ext-pptx", (f) => { ext.pptx = f; suggestExtName(); });
+document.querySelectorAll('input[name="ext-fmt"]').forEach((r) => r.addEventListener("change", suggestExtName));
+const extFmt = () => document.querySelector('input[name="ext-fmt"]:checked').value;
+function suggestExtName() {
+  if (!ext.pptx) return;
+  const cur = $("ext-out").value.trim();
+  if (cur && cur !== ext.autoName) return; // 사용자가 직접 고친 이름은 유지
+  ext.autoName = `${baseName(ext.pptx.name)}_발표자노트${extFmt() === "markdown" ? ".md" : ".txt"}`;
+  $("ext-out").value = ext.autoName;
+}
+$("ext-run").onclick = async () => {
+  if (!ext.pptx) { log("⚠ PPTX 파일을 선택하세요."); return; }
+  const fmt = extFmt();
+  const outName = $("ext-out").value.trim() || `${baseName(ext.pptx.name)}_발표자노트${fmt === "markdown" ? ".md" : ".txt"}`;
+  log("\n===== [노트 추출] 시작 =====");
+  $("ext-run").disabled = true;
+  try {
+    if (!checkPptxFile(ext.pptx)) return;
+    const prs = await Pptx.open(ext.pptx);
+    const slides = await prs.slideParts();
+    const data = [];
+    for (let i = 0; i < slides.length; i++) data.push([i + 1, (await prs.readNotes(slides[i])).trim()]);
+    log(`총 ${data.length}장의 슬라이드에서 노트를 추출했습니다. (노트 없는 슬라이드 ${data.filter(([, t]) => !t).length}장)`);
+    const text = fmt === "markdown" ? formatAsMarkdown(data) : formatAsDash(data);
+    downloadBlob(new Blob([text], { type: "text/plain;charset=utf-8" }), outName);
+    log(`✅ '${outName}' 파일을 내려받았습니다. (형식: ${fmt})`);
+    shared.lastExtractedText = text; shared.lastExtractedName = outName; shared.lastExtractedNotes = data;
+    log("→ '노트 삽입' / '음성 변환' 탭에서 '방금 추출한 노트 사용'으로 바로 불러올 수 있습니다.");
+    $("ext-preview").value = text; $("ext-preview-wrap").hidden = false; $("ext-copy").hidden = false;
+  } catch (e) {
+    log("오류: " + (e.message || e));
+  } finally { $("ext-run").disabled = false; }
+};
+$("ext-copy").onclick = async () => {
+  const ta = $("ext-preview");
+  try { await navigator.clipboard.writeText(ta.value); log("✓ 추출 결과를 클립보드에 복사했습니다."); }
+  catch (e) { ta.focus(); ta.select(); log("⚠ 자동 복사가 막혀 있어 텍스트를 선택해 두었습니다. Ctrl+C(⌘+C)로 복사하세요."); }
+};
+
+/* ═════════════ ③ 음성 변환 (Azure REST API) ═════════════ */
+const TTS_MAX_CHARS = 2000; // 1회 요청 오디오 10분 제한을 넉넉히 피하는 크기
+const AZURE_FORMAT = "audio-24khz-160kbitrate-mono-mp3";
+const tts = { notesText: null, notesData: null, results: [], abort: null };
+
+// 키 기억 (선택)
+// 이전 버전이 평문으로 남긴 키는 제거
+try { localStorage.removeItem("pptnote.azure"); } catch (e) {}
+
+/* 키 보관함: PBKDF2(SHA-256, 60만회) → AES-256-GCM. 아이디는 AAD로 묶어 다른 아이디로 복호화 불가 */
+const VAULT_PREFIX = "pptnote.vault.";
+const VAULT_ITER = 600000;
+const b64 = (u8) => btoa(String.fromCharCode(...u8));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+async function vaultKey(pw, salt, iter) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iter }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function vaultSeal(id, pw, obj) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const k = await vaultKey(pw, salt, VAULT_ITER);
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(id) }, k, new TextEncoder().encode(JSON.stringify(obj)));
+  return { v: 1, id, iter: VAULT_ITER, salt: b64(salt), iv: b64(iv), ct: b64(new Uint8Array(ct)) };
+}
+async function vaultOpen(id, pw, blob) {
+  const k = await vaultKey(pw, unb64(blob.salt), blob.iter);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(blob.iv), additionalData: new TextEncoder().encode(id) }, k, unb64(blob.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+function vaultCreds() {
+  const id = $("vault-id").value.trim(), pw = $("vault-pw").value;
+  if (!window.isSecureContext || !crypto.subtle) { log("✗ 보관함은 HTTPS(또는 localhost)에서만 동작합니다."); return null; }
+  if (!id || !pw) { log("⚠ 아이디와 비밀번호를 입력하세요."); return null; }
+  if (pw.length < 8) { log("⚠ 비밀번호는 8자 이상으로 하세요."); return null; }
+  return { id, pw };
+}
+function applyVault(d) {
+  $("tts-key").value = d.key || ""; $("tts-region").value = d.region || "koreacentral"; $("tts-voice").value = d.voice || "";
+}
+$("vault-save").onclick = async () => {
+  const c = vaultCreds(); if (!c) return;
+  const key = $("tts-key").value.trim();
+  if (!key) { log("⚠ 저장할 Azure API 키를 먼저 입력하세요."); return; }
+  try {
+    const blob = await vaultSeal(c.id, c.pw, { key, region: $("tts-region").value.trim(), voice: $("tts-voice").value.trim() });
+    localStorage.setItem(VAULT_PREFIX + c.id, JSON.stringify(blob));
+    log(`✓ '${c.id}' 보관함에 암호화하여 저장했습니다.`);
+  } catch (e) { log("✗ 저장 실패: " + e.message); }
+};
+$("vault-load").onclick = async () => {
+  const c = vaultCreds(); if (!c) return;
+  let blob; try { blob = JSON.parse(localStorage.getItem(VAULT_PREFIX + c.id) || "null"); } catch (e) {}
+  if (!blob) { log(`⚠ '${c.id}' 보관함이 이 브라우저에 없습니다. 다른 PC에서 저장했다면 '파일 가져오기'를 쓰세요.`); return; }
+  try { applyVault(await vaultOpen(c.id, c.pw, blob)); log(`✓ '${c.id}' 보관함에서 키를 불러왔습니다.`); }
+  catch (e) { log("✗ 아이디 또는 비밀번호가 올바르지 않습니다."); }
+};
+$("vault-export").onclick = () => {
+  const id = $("vault-id").value.trim();
+  const raw = id && localStorage.getItem(VAULT_PREFIX + id);
+  if (!raw) { log("⚠ 내보낼 보관함이 없습니다. 아이디를 입력하고 먼저 저장하세요."); return; }
+  downloadBlob(new Blob([raw], { type: "application/json" }), `ppt-vault-${id}.json`);
+  log("✓ 암호화된 보관함 파일을 내려받았습니다. (비밀번호 없이는 열 수 없습니다)");
+};
+$("vault-import").onchange = async (ev) => {
+  const f = ev.target.files[0]; ev.target.value = ""; if (!f) return;
+  try {
+    const blob = JSON.parse(await f.text());
+    if (blob.v !== 1 || !blob.id || !blob.ct || !blob.salt || !blob.iv || !(blob.iter >= 100000)) throw new Error("형식이 올바르지 않습니다.");
+    localStorage.setItem(VAULT_PREFIX + blob.id, JSON.stringify(blob));
+    $("vault-id").value = blob.id;
+    log(`✓ '${blob.id}' 보관함을 가져왔습니다. 비밀번호를 입력하고 '불러오기'를 누르세요.`);
+  } catch (e) { log("✗ 가져오기 실패: " + e.message); }
+};
+$("vault-del").onclick = () => {
+  const id = $("vault-id").value.trim();
+  if (!id || !localStorage.getItem(VAULT_PREFIX + id)) { log("⚠ 삭제할 보관함이 없습니다."); return; }
+  if (confirm(`'${id}' 보관함을 이 브라우저에서 삭제할까요?`)) { localStorage.removeItem(VAULT_PREFIX + id); log(`✓ '${id}' 보관함을 삭제했습니다.`); }
+};
+function persistKey() {} // 평문 저장 제거됨 (호환용 no-op)
+
+setupDrop("tts-notes", async (f) => { tts.notesText = await readText(f); tts.notesData = null; tts.srcName = f.name; $("tts-notes-src").textContent = ""; });
+$("tts-use-last").onclick = () => {
+  if (!shared.lastExtractedNotes) { log("⚠ 먼저 '노트 추출' 탭에서 노트를 추출하면 여기서 바로 불러올 수 있습니다."); return; }
+  tts.notesData = shared.lastExtractedNotes; tts.notesText = null; tts.srcName = shared.lastExtractedName;
+  $("tts-notes-src").textContent = `사용 중: ${shared.lastExtractedName} (방금 추출한 노트)`;
+  log(`'노트 추출' 탭 결과를 불러왔습니다: ${shared.lastExtractedName}`);
+};
+
+const ttsHost = (region) => `https://${region}.tts.speech.microsoft.com`;
+function extractVoiceName(sel) {
+  sel = (sel || "").trim();
+  const m = sel.match(/\(([^()]+)\)\s*$/);
+  return m ? m[1].trim() : sel;
+}
+function explainFetchError(e, status) {
+  if (status === 401) return "인증 실패(401): API 키가 틀렸거나 리전이 키와 맞지 않습니다.";
+  if (status === 403) return "거부됨(403): 키 권한 또는 무료 한도를 확인하세요.";
+  if (status === 429) return "요청이 너무 많습니다(429). 잠시 후 다시 시도하세요.";
+  if (e && e.name === "TypeError") return `네트워크 오류: 리전 이름(${$("tts-region").value.trim()})이 맞는지, 인터넷/회사 방화벽을 확인하세요.`;
+  return String(e && e.message || e || `HTTP ${status}`);
+}
+
+$("tts-load-voices").onclick = async () => {
+  const key = $("tts-key").value.trim(), region = $("tts-region").value.trim(), loc = $("tts-locale").value.trim();
+  if (!key || !region) { log("⚠ API 키와 리전을 먼저 입력하세요."); return; }
+  log(`음성 목록을 불러오는 중... (리전: ${region}, 로케일: ${loc || "전체"})`);
+  $("tts-load-voices").disabled = true;
+  try {
+    const res = await fetch(`${ttsHost(region)}/cognitiveservices/voices/list`, { headers: { "Ocp-Apim-Subscription-Key": key } });
+    if (!res.ok) throw Object.assign(new Error(await res.text()), { status: res.status });
+    let voices = await res.json();
+    if (loc) voices = voices.filter((v) => (v.Locale || "").toLowerCase() === loc.toLowerCase());
+    const dl = $("tts-voices"); dl.textContent = "";
+    voices.forEach((v) => { const o = document.createElement("option"); o.value = `${v.LocalName} · ${v.Gender} (${v.Locale}) (${v.ShortName})`; dl.appendChild(o); });
+    if (voices.length && !$("tts-voice").value.trim()) $("tts-voice").value = dl.firstChild.value;
+    log(`✓ 사용 가능한 음성 ${voices.length}개를 불러왔습니다. 음성 칸을 클릭하면 목록이 보입니다.`);
+  } catch (e) {
+    log("✗ 음성 목록을 불러오지 못했습니다: " + explainFetchError(e, e.status));
+  } finally { $("tts-load-voices").disabled = false; }
+};
+
+function splitForTts(text, max = TTS_MAX_CHARS) {
+  text = text.trim();
+  if (text.length <= max) return [text];
+  const sentences = text.split(/(?<=[.!?\n])\s+/);
+  const chunks = []; let cur = "";
+  for (const s of sentences) {
+    const cand = cur ? `${cur} ${s}`.trim() : s;
+    if (cand.length > max && cur) { chunks.push(cur.trim()); cur = s; } else cur = cand;
+  }
+  if (cur) chunks.push(cur.trim());
+  return chunks;
+}
+function parseSlideRange(str, available) {
+  str = (str || "").trim();
+  if (!str) return null;
+  const sel = new Set();
+  for (let part of str.split(",")) {
+    part = part.trim(); if (!part) continue;
+    if (part.includes("-")) {
+      const [a, b] = part.split("-", 2).map((x) => parseInt(x.trim(), 10));
+      if (isNaN(a) || isNaN(b)) continue;
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) sel.add(i);
+    } else { const n = parseInt(part, 10); if (!isNaN(n)) sel.add(n); }
+  }
+  return new Set(available.filter((n) => sel.has(n)));
+}
+const xmlEscape = (s) => s.replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[c]));
+
+async function ttsRequest(key, region, voice, text, signal) {
+  const lang = (voice.match(/^([a-z]{2,3}-[A-Z]{2})/) || [, "ko-KR"])[1];
+  const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}"><voice name="${xmlEscape(voice)}">${xmlEscape(text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ""))}</voice></speak>`;
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`${ttsHost(region)}/cognitiveservices/v1`, {
+      method: "POST", signal,
+      headers: { "Ocp-Apim-Subscription-Key": key, "Content-Type": "application/ssml+xml", "X-Microsoft-OutputFormat": AZURE_FORMAT },
+      body: ssml,
+    });
+    if (res.ok) return await res.blob();
+    if (res.status === 429 && attempt <= 6) { // 무료 티어 분당 요청 제한 → 잠시 대기 후 재시도
+      const wait = (parseInt(res.headers.get("Retry-After") || "", 10) || 5 * attempt) * 1000;
+      log(`    요청 한도 초과(429) → ${Math.round(wait / 1000)}초 후 재시도 (${attempt}/6)`);
+      await sleep(wait); continue;
+    }
+    if (res.status === 400) throw new Error(`요청 오류(400): 음성 이름(${voice})이 올바른지 확인하세요.`);
+    throw Object.assign(new Error(explainFetchError(null, res.status)), { status: res.status });
+  }
+}
+
+$("tts-stop").onclick = () => { if (tts.abort) tts.abort.abort(); };
+$("tts-run").onclick = async () => {
+  const key = $("tts-key").value.trim(), region = $("tts-region").value.trim();
+  const voice = extractVoiceName($("tts-voice").value);
+  if (!tts.notesText && !tts.notesData) { log("⚠ 노트 파일을 선택하거나 '방금 추출한 노트 사용'을 눌러주세요."); return; }
+  if (!key || !region) { log("⚠ Azure API 키와 리전을 모두 입력하세요."); return; }
+  if (!voice) { log("⚠ 음성을 선택하거나 이름을 입력하세요. ('음성 목록 불러오기' 버튼 이용 가능)"); return; }
+  persistKey();
+
+  log("\n===== [음성 변환] 시작 =====");
+  let data = tts.notesData;
+  if (!data) {
+    const { notes, order, fmt } = loadNotes(tts.notesText);
+    data = order.map((n) => [n, notes.get(n)]);
+    log(`노트 파일 형식: ${fmt} / 총 ${data.length}개 슬라이드`);
+  }
+  const filter = parseSlideRange($("tts-range").value, data.map(([n]) => n));
+  if (filter && !filter.size) { log("지정한 슬라이드 범위에 해당하는 슬라이드가 없습니다."); return; }
+  const targets = filter ? data.filter(([n]) => filter.has(n)) : data;
+  if (!targets.length) { log("변환할 슬라이드가 없습니다."); return; }
+
+  tts.results.forEach((r) => URL.revokeObjectURL(r.url));
+  tts.results = [];
+  tts.abort = new AbortController();
+  const list = $("tts-list"); list.textContent = "";
+  $("tts-result").hidden = false; $("tts-dl-zip").disabled = true; $("tts-dl-combined").disabled = true;
+  $("tts-run").disabled = true; $("tts-stop").hidden = false;
+  const prog = $("tts-progress"); prog.max = targets.length; prog.value = 0;
+  log(`총 ${targets.length}개 슬라이드 음성 생성을 시작합니다. (리전: ${region}, 음성: ${voice})`);
+
+  try {
+    for (let i = 0; i < targets.length; i++) {
+      const [no, text] = targets[i];
+      $("tts-status").textContent = `${i + 1} / ${targets.length} · 슬라이드 ${no}`;
+      if (!text || !text.trim() || text.trim() === "(발표자 노트 없음)") { log(`  슬라이드 ${no}: 노트 내용이 없어 건너뜁니다.`); prog.value = i + 1; continue; }
+      log(`  슬라이드 ${no} 음성 생성 중... (${text.length}자)`);
+      try {
+        const parts = [];
+        for (const chunk of splitForTts(text)) parts.push(await ttsRequest(key, region, voice, chunk, tts.abort.signal));
+        const blob = new Blob(parts, { type: "audio/mpeg" });
+        const name = `slide_${pad(no, 3)}.mp3`;
+        const url = URL.createObjectURL(blob);
+        tts.results.push({ no, name, blob, url });
+        const row = document.createElement("div"); row.className = "audio-item";
+        row.innerHTML = `<span>${name.replace(".mp3", "")}</span><audio controls preload="none"></audio>`;
+        row.querySelector("audio").src = url;
+        list.appendChild(row);
+        log(`    → 완료: ${name}`);
+      } catch (e) {
+        if (e.name === "AbortError") throw e;
+        log(`    ✗ 슬라이드 ${no} 음성 생성 실패: ${explainFetchError(e, e.status)}`);
+        if (e.status === 401 || e.name === "TypeError") { log("✗ 설정 문제로 보여 나머지 슬라이드는 중단합니다."); break; }
+      }
+      prog.value = i + 1;
+    }
+  } catch (e) {
+    if (e.name === "AbortError") log("⚠ 사용자가 중지했습니다. 지금까지 만든 파일은 받을 수 있습니다.");
+    else log("오류: " + (e.message || e));
+  } finally {
+    $("tts-run").disabled = false; $("tts-stop").hidden = true; tts.abort = null;
+    const n = tts.results.length;
+    $("tts-status").textContent = `완료 · ${n}개 생성`;
+    log(`\n총 ${n}개 슬라이드의 음성 파일을 생성했습니다.`);
+    if (n) {
+      $("tts-dl-zip").disabled = false; $("tts-dl-combined").disabled = false;
+      if ($("tts-combine").checked) downloadCombined();
+      log("→ 아래 버튼으로 슬라이드별 MP3(ZIP) 또는 합친 MP3를 받으세요.");
+    }
+  }
+};
+const ttsBase = () => baseName(tts.srcName || "노트");
+async function downloadZip() {
+  const zip = new JSZip();
+  tts.results.forEach((r) => zip.file(r.name, r.blob));
+  const blob = await zip.generateAsync({ type: "blob" }); // mp3는 이미 압축돼 있어 STORE
+  downloadBlob(blob, `${ttsBase()}_음성.zip`);
+  log(`✓ '${ttsBase()}_음성.zip' (${tts.results.length}개 파일)을 내려받았습니다.`);
+}
+function downloadCombined() {
+  downloadBlob(new Blob(tts.results.map((r) => r.blob), { type: "audio/mpeg" }), `${ttsBase()}_전체.mp3`);
+  log(`✓ '${ttsBase()}_전체.mp3' 를 내려받았습니다.`);
+  log("※ 단순 결합 방식이라 슬라이드 사이 무음 간격 등 매끄러움은 보장되지 않습니다.");
+}
+$("tts-dl-zip").onclick = downloadZip;
+$("tts-dl-combined").onclick = downloadCombined;
+
+/* ═════════════ ④ PDF → PPT ═════════════ */
+const MAX_CANVAS_PIXELS = 16777216; // 사파리 등 브라우저 캔버스 한계(4096×4096)
+const pdf = { file: null };
+setupDrop("pdf-file", (f) => {
+  pdf.file = f; $("pdf-out").value = `${baseName(f.name)}.pptx`;
+  $("pdf-status").textContent = "변환 시작 버튼을 누르세요."; $("pdf-to-insert").hidden = true;
+});
+const blobToDataUrl = (blob) => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
+
+$("pdf-run").onclick = async () => {
+  if (!pdf.file) { log("⚠ PDF 파일을 먼저 선택하세요."); return; }
+  if (typeof pdfjsLib === "undefined" || typeof PptxGenJS === "undefined") { log("오류: 변환 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 페이지를 새로고침하세요."); return; }
+  const dpi = Math.min(600, Math.max(72, parseInt($("pdf-dpi").value, 10) || 300));
+  const quality = Math.min(100, Math.max(1, parseInt($("pdf-q").value, 10) || 95));
+  let outName = $("pdf-out").value.trim() || `${baseName(pdf.file.name)}.pptx`;
+  if (!/\.pptx$/i.test(outName)) outName += ".pptx";
+  const wantJpg = $("pdf-jpg").checked;
+  const prog = $("pdf-progress"), status = $("pdf-status");
+  const step = (done, total, msg) => { prog.max = total; prog.value = done; status.textContent = msg; log(msg); };
+
+  $("pdf-run").disabled = true; $("pdf-to-insert").hidden = true;
+  log("\n===== [PDF → PPT] 변환 시작 =====");
+  log(`PDF → JPG 변환 중... (DPI ${dpi}, 품질 ${quality})`);
+  try {
+    const doc = await pdfjsLib.getDocument({ data: new Uint8Array(await pdf.file.arrayBuffer()) }).promise;
+    const total = doc.numPages;
+    const images = []; let slideW = 0, slideH = 0;
+    for (let i = 1; i <= total; i++) {
+      const page = await doc.getPage(i);
+      let scale = dpi / 72;
+      const base = page.getViewport({ scale: 1 });
+      if (i === 1) { slideW = base.width / 72; slideH = base.height / 72; } // 슬라이드 = 첫 페이지 실제 크기(인치)
+      if (base.width * scale * base.height * scale > MAX_CANVAS_PIXELS) {
+        const s2 = Math.sqrt(MAX_CANVAS_PIXELS / (base.width * base.height));
+        log(`⚠ ${i}페이지가 브라우저 캔버스 한계를 넘어 ${Math.floor(s2 * 72)} DPI로 낮춰 렌더링합니다.`);
+        scale = s2;
+      }
+      const vp = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.floor(vp.width); canvas.height = Math.floor(vp.height);
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", quality / 100));
+      images.push(blob);
+      step(i, total, `[JPG] ${i}/${total} 페이지 렌더링 완료 (${canvas.width}x${canvas.height}px)`);
+      canvas.width = canvas.height = 0; page.cleanup();
+    }
+    await doc.destroy();
+
+    log("PPT 생성 중...");
+    const pptx = new PptxGenJS();
+    const w = Math.min(56, Math.max(1, slideW)), h = Math.min(56, Math.max(1, slideH));
+    pptx.defineLayout({ name: "PDF", width: w, height: h });
+    pptx.layout = "PDF";
+    for (let i = 0; i < images.length; i++) {
+      const dataUrl = await blobToDataUrl(images[i]);
+      pptx.addSlide().addImage({ data: dataUrl.replace(/^data:/, ""), x: 0, y: 0, w, h });
+      step(i + 1, images.length, `[PPT] ${i + 1}/${images.length} 슬라이드 생성 완료`);
+    }
+    const out = await pptx.write({ outputType: "blob" });
+    downloadBlob(out, outName);
+    if (wantJpg) {
+      const zip = new JSZip();
+      images.forEach((b, i) => zip.file(`page_${pad(i + 1, 3)}.jpg`, b));
+      downloadBlob(await zip.generateAsync({ type: "blob" }), `${baseName(pdf.file.name)}_slides.zip`);
+      log(`✓ JPG 이미지 ${images.length}장을 '${baseName(pdf.file.name)}_slides.zip' 으로 내려받았습니다.`);
+    }
+    shared.lastPdfPptx = new File([out], outName, { type: out.type });
+    status.textContent = `완료: ${outName}`;
+    log(`\n✅ 변환 완료: '${outName}' 을(를) 내려받았습니다. (슬라이드 크기 ${w.toFixed(2)} × ${h.toFixed(2)} in)`);
+    $("pdf-to-insert").hidden = false;
+  } catch (e) {
+    status.textContent = "오류 발생 (로그 확인)";
+    log("오류: PDF 변환 중 문제가 발생했습니다: " + (e.message || e));
+    if (/password/i.test(e.name || e.message)) log("  → 암호가 걸린 PDF는 변환할 수 없습니다.");
+  } finally { $("pdf-run").disabled = false; }
+};
+$("pdf-to-insert").onclick = () => {
+  if (!shared.lastPdfPptx) return;
+  ins.pptx = shared.lastPdfPptx;
+  insPptxDrop.set(`${ins.pptx.name}  ·  PDF 변환 결과`);
+  $("ins-pptx-src").textContent = "④ PDF → PPT 탭에서 방금 만든 파일을 사용합니다.";
+  $("ins-out").value = `${baseName(ins.pptx.name)}_노트삽입.pptx`;
+  showTab("insert");
+  log("④ 변환 결과를 '노트 삽입' 탭의 원본 PPTX로 넘겼습니다.");
+};
+
+// 라이브러리 로딩 확인
+window.addEventListener("load", () => {
+  const missing = [];
+  if (typeof JSZip === "undefined") missing.push("JSZip");
+  if (typeof pdfjsLib === "undefined") missing.push("pdf.js");
+  if (typeof PptxGenJS === "undefined") missing.push("PptxGenJS");
+  if (missing.length) log(`✗ 라이브러리(${missing.join(", ")})를 불러오지 못했습니다. 인터넷 연결 또는 회사 방화벽을 확인하세요.`);
+  else log("✓ 준비 완료. 탭을 골라 작업을 시작하세요.");
+});
+</script>
+</body>
+</html>
